@@ -1,0 +1,7 @@
+prefix=E:/Librarys/openGL_Librarys/glm/glminstall
+includedir=${prefix}/include
+
+Name: GLM
+Description: OpenGL Mathematics
+Version: 0.9.8
+Cflags: -I${includedir}
