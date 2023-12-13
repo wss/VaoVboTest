@@ -46,6 +46,7 @@ float lastFrame = 0.0f;
 const char* vertexShaderSource = R"(
     #version 330 core
     layout(location = 0) in vec3 inPosition;
+    layout (location = 1) in vec3 aNormal;
     //uniform mat4 modelViewProjection;
     uniform mat4 model;
     uniform mat4 view;
@@ -67,8 +68,9 @@ const char* fragmentShaderSource = "#version 330 core\n"
 "}\n\0";
 
 
-typedef  TriMesh_ArrayKernelT<> MyMesh;
 
+//typedef  TriMesh_ArrayKernelT<> MyMesh;
+typedef PolyMesh_ArrayKernelT<>MyMesh;
 
 int main()
 {
@@ -80,7 +82,6 @@ int main()
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 
-    
     // 创建窗口
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL", NULL, NULL);
     if (window == NULL)
@@ -144,15 +145,48 @@ int main()
         glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
         std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
     }
+
     // 添加完成后删除
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
-
+    IO::Options opt;
     MyMesh mesh;
-    IO::read_mesh(mesh,"E:\\learning\\Qt_learning\\Cart3D_QTDemo\\testData\\output_ascii.stl");
+    // 请求法线
+   mesh.request_vertex_normals();
 
-    // 将Mesh保存为ASCII格式STL文件
- 
+    IO::read_mesh(mesh,"E:\\learning\\Qt_learning\\Cart3D_QTDemo\\testData\\100642730142856\\lower.stl", opt);
+
+    if (!mesh.has_vertex_normals())
+    {
+        std::cout << "错误：标准定点属性 “法线”不存在" << std::endl;
+        return -1;
+    }
+     //如果没有发现就计算
+    if (!opt.check(OpenMesh::IO::Options::VertexNormal))
+    {
+        std::cout << "计算法线--------\n";
+        mesh.request_face_normals();
+        mesh.update_normals();
+        mesh.release_face_normals();
+    }
+
+
+    std::vector<float> vertex;
+    // 遍历面片
+    for (MyMesh::FaceIter f_it = mesh.faces_begin(); f_it != mesh.faces_end(); ++f_it)
+    {
+        // 遍历面片上的顶点
+        for (MyMesh::FaceVertexIter fv_it = mesh.fv_iter(*f_it); fv_it.is_valid(); ++fv_it)
+        {
+            // 获取每个面片上的点
+            auto point = mesh.point(*fv_it);
+            vertex.push_back(point[0]);
+            vertex.push_back(point[1]);
+            vertex.push_back(point[2]);
+        }
+    }
+    
+
 
     // 创建VAO和VBO并绑定顶点数组
     unsigned int VAO, VBO;
@@ -160,18 +194,26 @@ int main()
     glGenBuffers(1, &VBO);
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER,VBO);
-    glBufferData(GL_ARRAY_BUFFER, mesh.n_vertices()*sizeof(MyMesh::Point), &mesh.points()[0], GL_STATIC_DRAW);
-   
- /*   for (int i = 0; i < mesh.n_vertices(); i++) {
+    //glBufferData(GL_ARRAY_BUFFER, mesh.n_vertices()*sizeof(MyMesh::Point), &mesh.points()[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertex.size()*sizeof(float), vertex.data(), GL_STATIC_DRAW);
+
+    /*for(int i = 0; i < mesh.n_vertices(); i++) {
         std::cout << "point :" << mesh.points()[i] << "\n";
     }*/
+
     std::cout << "n_vertices :" << mesh.n_vertices() << "\n";
     std::cout << "n_faces :" << mesh.n_faces() << "\n";
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    std::cout << "n_edges :" << mesh.n_edges()<< "\n";
+    std::cout << "size:" << sizeof(mesh.points()[0])<<"\n";
+    
+
+    // layout(location = 0)着色器0  顶点的大小vec3所以是3   浮点类型GL_FLOAT  是否交给opengl标准化 步长
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,3*sizeof(float), (void*)0);
+    //vaobj 指定 和 函数的顶点数组对象的名称
     glEnableVertexAttribArray(0);
 
     glBindVertexArray(0);
-
+    // 使用着色器程序
     glUseProgram(shaderProgram);
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
     glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, &projection[0][0]);
@@ -189,10 +231,11 @@ int main()
         glEnable(GL_DEPTH_TEST);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
-        //// 设置着色器程序
+        // 设置着色器程序
         glUseProgram(shaderProgram);
-        glm::mat4 modelMatrix = glm::mat4(1.0f); // 单位矩阵，初始为单位矩阵表示无任何变换
+        glm::mat4 modelMatrix = glm::mat4(1.0f); // 单位矩阵,初始为单位矩阵表示无任何变换
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, &modelMatrix[0][0]);
+
         float radius = 10.0f;
         float camX = sin(glfwGetTime()) * radius;
         float camZ = cos(glfwGetTime()) * radius;
@@ -201,18 +244,21 @@ int main()
         glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &view[0][0]);
 
-        
-       
-        ////// 6. 绘制
+
+        //// 6. 绘制
         glBindVertexArray(VAO); 
-        // 绘制模型   指定起始索引    要都显示的索引数
+        //                     绘制模式     指定起始索引    要显示索引的顶点数
         //glDrawArrays(GL_TRIANGLE_FAN,0, mesh.n_vertices());
         //glDrawArrays(GL_TRIANGLE_STRIP, 0, mesh.n_faces());
         //glDrawArrays(GL_TRIANGLE_STRIP, 0, mesh.n_vertices());
-        glDrawArrays(GL_TRIANGLE_FAN, 0, mesh.n_faces());
+        //glDrawArrays(GL_TRIANGLES, 0, mesh.n_faces());
+        //glDrawArrays(GL_TRIANGLES, 0, mesh.n_vertices());
+        //glDrawArrays(GL_LINES, 0, mesh.n_edges());
+        glDrawArrays(GL_TRIANGLES, 0, vertex.size());
+        
         //线框模式
         //glDrawArrays(GL_TRIANGLES, 0, vertex.size());
-        //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
